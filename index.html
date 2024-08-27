@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8" />
+    <title>title</title>
+    <style>
+        table {
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
+            border: 1px solid #666;
+            padding: 2px 5px;
+        }
+
+        td.spacer {
+            height: 10px;
+            min-width: 10px;
+            border: none;
+        }
+    </style>
+</head>
+
+<body>
+    Month (1-12):
+    <input type="text" id="txtMonth" value="8"></input></br>
+    Latitude:
+    <input type="text" id="txtLat" value="48.7595"></input></br>
+    Longitude:
+    <input type="text" id="txtLng" value="-122.4882"></input></br>
+    # of years:
+    <input type="text" id="txtYears" value="25"></input>
+    <input type="button" onclick="getData()" value="go" /></br>
+    <div id="progress"></div>
+    <div id="chart"></div></br></br>
+    <span id="lblLowTemp"></span></br>
+    <span id="lblHighTemp"></span></br>
+    <span id="lblAvgTemp"></span></br>
+</body>
+
+</html>
+<script>
+    function formatDate(year, month, date) {
+        let strDate = "";
+        if (year != 0) strDate += year + "-";
+        strDate += ((month < 10) ? "0" + month : month) + "-";
+        strDate += ((date < 10) ? "0" + date : date);
+        return strDate;
+    }
+
+    function lastDayOfMonth(month) {
+        switch (month) {
+            case 1, 3, 5, 7, 8, 10, 12:
+                return 31;
+            case 2:
+                return 28;
+            default:
+                return 30;
+        }
+    }
+
+    async function getData() {
+        let chart = document.getElementById('chart');
+        let month = document.getElementById('txtMonth').value * 1;
+        let monthLength = lastDayOfMonth(month * 1);
+        let lat = document.getElementById('txtLat').value;
+        let lng = document.getElementById('txtLng').value;
+        chart.innerHTML = "";
+        let url = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lng}&daily=temperature_2m_max,temperature_2m_min&timezone=America%2FLos_Angeles&temperature_unit=fahrenheit`;
+        let years = document.getElementById("txtYears").value;
+        const date = new Date();
+        let currentYear = date.getFullYear();
+        if (month > date.getMonth() + 1) currentYear--;
+        let data = [];
+
+        for (let i = 0; i < years; i++) {
+            document.getElementById("progress").innerText = `Getting data for year ${i + 1} of ${years}`;
+
+            let year = currentYear - years + 1 + i;
+            let start = formatDate(year, month, 1);
+            let lastDay = monthLength;
+            if ((i === years - 1) && (month == date.getMonth() + 1)) {
+                lastDay = date.getDate();
+            }
+
+            let end = formatDate(year, month, lastDay);
+
+            let endDate = new Date(end);
+            if (endDate > date) {
+                end = formatDate(date.getFullYear(), month, date.getDate());
+            }
+
+            const response = await fetch(url + "&start_date=" + start + "&end_date=" + end);
+            if (!response.ok) {
+                throw new Error(`Response status: ${response.status}`);
+            }
+            const json = await response.json();
+            data.push(json.daily.temperature_2m_max);
+        }
+        //check the last x records and remove nulls
+
+
+
+        document.getElementById("progress").innerText = 'Processing...';
+
+        let lowest = 200;
+        let highest = -100;
+        let tempSum = 0;
+        let tempCount = 0;
+        let dateTempSum = [];
+
+        for (i = 0; i < years; i++) {
+            for (let j = 0; j < monthLength; j++) {
+                let temp = data[i][j];
+                if (temp === null) break;
+                if (temp < lowest) lowest = temp;
+                if (temp > highest) highest = temp;
+                tempSum += temp;
+                tempCount++;
+                if (dateTempSum.length <= j) dateTempSum.push(0);
+                dateTempSum[j] += temp;
+            }
+        }
+
+        let tempRange = highest - lowest;
+        let midPoint = tempSum / tempCount;
+
+        document.getElementById("progress").innerText = '';
+        let html = '<table><tr><td></td>';
+        for (i = 0; i < data[0].length; i++) {
+            html += `<th>${formatDate(0, month, i + 1)}</th>`;
+        }
+        html += "<td class='spacer'></td><td>Avg</td>"
+        html += "</tr>";
+
+        for (i = 0; i < years; i++) {
+            html += `<tr><td>${currentYear - years + 1 + i}</td>`;
+            let yearlyTempSum = 0;
+            let yearlyTempCount = 0;
+            for (let j = 0; j < monthLength; j++) {
+                let temp = data[i][j];
+                if (!temp) {
+                    html += "<td></td>"
+                }
+                else {
+                    let r, g, b;
+                    if (temp < midPoint) {
+                        //the lower the temp is, the lower the values for r & g
+                        let percentBetweenLowAndAvg = (temp - lowest) / (midPoint - lowest);
+
+                        r = percentBetweenLowAndAvg * 255;
+                        g = r;
+                        b = 255;
+                    }
+                    else {
+                        let percentBetweenAvgAndHigh = (temp - midPoint) / (highest - midPoint);
+
+                        //the higher the temp is, the lower the values for b & g
+                        r = 255;
+                        g = 255 - (percentBetweenAvgAndHigh * 255);
+                        b = g;
+                    }
+                    html += `<td style='background-color: rgb(${r}, ${g}, ${b})'>${temp.toFixed(1)}</td>`;
+                    yearlyTempSum += temp;
+                    yearlyTempCount++;
+                }
+            }
+
+            html += `<td class='spacer'></td><td>${(yearlyTempSum / yearlyTempCount).toFixed(1)}</td></tr>`;
+        }
+        html += "<tr>";
+        for (i = 0; i < monthLength + 1; i++) {
+            html += "<td class='spacer'></td>";
+        }
+        html += "</tr>";
+        html += "<tr><td class='spacer'>avg:</td>";
+        for (i = 0; i < monthLength; i++) {
+            html += `<td>${(dateTempSum[i] / years).toFixed(1)}</td>`;
+        }
+        html += "</tr>";
+        html += "</table>";
+        chart.innerHTML = html;
+        document.getElementById('lblLowTemp').innerText = "Low Temp: " + lowest.toFixed(1);
+        document.getElementById('lblHighTemp').innerText = "High Temp: " + highest.toFixed(1);
+        document.getElementById('lblAvgTemp').innerText = "Avg Temp: " + midPoint.toFixed(1);
+    }
+</script>
